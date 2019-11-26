@@ -1,0 +1,31 @@
+title: plutarch(dc)
+author: David Cardozo
+
+header_pages:
+  - index.md
+  - contact.md
+
+style: dark
+
+plugins:
+  - jekyll-feed
+  - jekyll-seo-tag
+  - jekyll-redirect-from
+
+twitter:
+  username: _davidcardozo
+
+permalink: /:categories/:title/
+
+include: ['key.asc']
+
+exclude: ['helpers']
+
+# Google services
+google_analytics: UA-153214398-1
+
+defaults:
+  - scope:
+      path: "assets/img"
+    values:
+      image: true

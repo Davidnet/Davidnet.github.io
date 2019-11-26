@@ -1,0 +1,37 @@
+version: "3.7"
+services:
+  jekyll-service:
+    build:
+      context: .
+      dockerfile: Dockerfile
+
+    user: "plutarch"
+    working_dir: /home/plutarch
+
+    ports:
+      - 4000:4000
+
+    init: true
+
+    volumes:
+      # - ../balena_cli_configs:/home/ada/.balena
+      # - ./ssh-keys:/home/node/.ssh
+      # - ./scripts:/home/node/scripts
+      # - ./staged-releases:/home/node/staged-releases
+      # Update this to wherever you want VS Code to mount the folder of your project
+      - ..:/workspace
+      # - /tmp/.X11-unix:/tmp/.X11-unix
+      # Forwards the local Docker socket to the container.
+      # - /var/run/docker.sock:/var/run/docker.sock
+
+    # environment:
+    #   - DISPLAY=:1
+    #   # - QT_X11_NO_MITSHM=1
+
+    cap_add:
+     - SYS_PTRACE
+    security_opt:
+      - seccomp:unconfined
+
+    stdin_open: true
+    tty: true
