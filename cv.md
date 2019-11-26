@@ -1,6 +1,7 @@
 ---
 title: /ceevee
 layout: page
+menu: /cv
 permalink: /cv
 ---
 ## Summary
