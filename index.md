@@ -8,5 +8,5 @@ layout: posts
 # plutarch(dc)
 
 <small>
-The following notes are my crazy effort of having a place to write, to explore amd to find my own little space on this huge city called the internet.
+The following notes are my crazy effort of having a place to write, to explore and to find my own little space on this huge city called the internet.
 </small>
