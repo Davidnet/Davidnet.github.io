@@ -52,7 +52,7 @@ __Security Analyst at Independent__ - _Bogota, Colombia
 `2017.01`
 __Teacher Assistant at [Stanford Pre-Collegiate Summer Institutes](https://summerinstitutes.spcs.stanford.edu/)__ - _Chía, Colombia
 
-Project beetwen [Eduexplora](eduexplora.com) and [Stanford](https://summerinstitutes.spcs.stanford.edu/)
+Project beetwen [Eduexplora](https://www.eduexplora.com) and [Stanford](https://summerinstitutes.spcs.stanford.edu/)
 
 - Introducing concepts of computer science to Colombian high school students.
 - Teaching Julia as a programming tool for problems in mathematics.
