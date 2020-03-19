@@ -9,4 +9,6 @@ layout: posts
 
 <small>
 The following notes are my crazy effort of having a place to write, to explore and to find my own little space on this huge city called the internet.
+
+If you want to take a look at my CV in pdf file, [just click here](https://drive.google.com/a/berkeley.edu/file/d/1GXiQxBa-OPM_KnXfd5Ag2aCWeRQhGzVI/view?usp=sharing)
 </small>
