@@ -10,6 +10,6 @@ permalink: /contact
 
 Me, David Cardozo.
 
-Email: david[at]kiwicampus[dot]com
+Email: davidcardozo[at]berkeley[dot]edu
 
 [GPG key](/key.asc) \| [GitHub](https://github.com/Davidnet/) \| [Twitter](https://twitter.com/_davidcardozo) \| [LinkedIn](https://www.linkedin.com/in/davidcardozo/)
