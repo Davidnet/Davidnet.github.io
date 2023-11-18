@@ -6,18 +6,37 @@ permalink: /cv
 ---
 ## Summary
 
-Machine learning engineer with strength in software development, embedded systems and deep learning applications on the edge with profound knowledge of applied mathematics and open-source.
+I am a Machine Learning Scientist and technologist, with a primary focus on utilizing cutting-edge technologies like Jax/Flax, Docker, Kubeflow, and TensorFlow to create impactful products that address complex challenges. I am a seasoned infrastructure architect and cloud forensics technician with expertise in GCP (Google Cloud Platform) and Azure. I specialize in deploying MLOps (Machine Learning Operations) solutions using Kubeflow. 
 
-Currently AI & Robotics lead at [Kiwi Campus](https://www.kiwibot.com/) and Google Developer Expert in Machine Learning.
+I am a software developer with a diverse background in software exploitation, math, information security, open-source development, and DevOps practices. I have extensive experience in these areas, and I am particularly passionate about community engagement and leadership in ML communities both in Canada and Colombia.
 
-* vision systems based on deep learning.
-* open-source development and technologies.
-* software and technology development.
-* Nvidia IoT expert.
+Additionally, I am a Google Developer Expert, Docker Captain, and Kubeflow Community member.
+
+Currently I am working as Chief Lead Analyst for Updata in Canada.
+I speak English, French & Spanish
 
 ## Experience
 
-`2019.03 - present`
+`September 2021 - Present`
+__Chief Lead Analyst / Tech Lead at [Updata](https://www.updata.ca/)__ - _Victoriaville, Quebec, Canada_
+
+- Design, develop, integrate, test, and implement systems in artificial intelligence (database analysis, integration of capture equipment, etc.);
+- Provide technical supervision of the team of IT consultants located abroad.
+
+`July 2020 - December 2020`
+__Chief Technology Officer / Founder at Cerberus__ - _Bogota D.C., Capital District, Colombia_
+
+- Building data pipelines using Kubernetes, Podman, Buildah, and Skopeo;
+- Supporting over 120 small-to-medium Hospitals in Colombia in data engineering as a service for doing analytics and Google Data Studio dashboards (with the support of Grafena and Portainer);
+- Giving tools to IT engineers in Colombia by developing container tools to automate their deployment, built a REST API service for electronic invoicing in Colombia that can handle automatic horizontal scaling in GCP using Fedora CoreOS and ignition alongside CloudSQL.
+
+`2019.07`
+__Google Developer Expert at [Google Developers](https://developers.google.cn/community/experts/directory/profile/profile-david_cardozo/)__ - Canada
+- Google Developers Experts are a global network of certified experienced developers and professionals actively supporting developers, startups and companies changing the world through AI and machine learning.
+- First Google developer expert on the areas of Machine Learning and Artificial Inteligence in Colombia.
+
+
+`2019.03 - 2020`
 __AI & Robotics Lead Lead at [Kiwi Campus](https://www.kiwibot.com/)__ - _Berkeley, United States
 
 - Defining metrics, project goals and OKRs distributed over talented engineers, computing resources and technicians to keep track of
@@ -27,12 +46,6 @@ Kiwi Campus goals.
 - Create and manage innovation spaces concentrated on organizational issues around the KiwiBot product and different internal areas
 inside Kiwi Campus.
 - Development at the hardware-software interface for parallel intelligence systems.
-
-
-`2019.07`
-__Google Developer Expert at [Google Developers](https://developers.google.cn/community/experts/directory/profile/profile-david_cardozo/)__ - _Medellín, Colombia
-- Google Developers Experts are a global network of certified experienced developers and professionals actively supporting developers, startups and companies changing the world through AI and machine learning.
-- First Google developer expert on the areas of Machine Learning and Artificial Inteligence in Colombia.
 
 `2017.06 - 2019.03`
 __Machine Learning Engineer at [Kiwi Campus](https://www.kiwibot.com/)__ - _Berkeley, United States
@@ -90,6 +103,15 @@ Moodle administrator and course creator.
 - English, Spanish, French
 
 ## Education
+
+`2022`
+__Universidad of London, London__
+
+_Bachelor of Computer Science_ program
+
+_Field of study:_ ML/AI
+Courses: Artificial Intelligence, Machine Learning, Data Science, Data Structures and Algorithms, Software Engineering, Computer Systems, Databases, Web Development, Computer Security, Computer Networking, Operating Systems, Computer Architecture, Discrete Mathematics, Calculus, Linear Algebra, Statistics, Probability, and Combinatorics.
+
 
 `2013-2016`
 __Universidad de los Andes, Bogota__
