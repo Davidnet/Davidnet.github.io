@@ -57,7 +57,105 @@ grad_clip_norm: 1.0
 selection_metric: macro_f1
 ```
 
-The training step is a thin pmap closure with all-reduces at the right places. Gradients, batch-stats, and EMA updates are all `pmean`'d across the `batch` axis:
+## A guided tour of the JAX code
+
+Before showing the train step, it's worth walking through the building blocks the loop assembles. Each one is short (the TPU project's training package is under 850 lines of Python), and reading them top-down gives a fair sense of how JAX, Flax, and Optax fit together.
+
+**1. The learning-rate schedule** is one Optax call. It's a pure function `step -> lr`, so the optimizer can ask for the LR at any step without keeping side state:
+
+```python
+# src/breast_patch_cls/training/lr_schedules.py
+def create_learning_rate_schedule(config: TrainConfig, steps_per_epoch: int):
+    warmup_steps = config.warmup_epochs * steps_per_epoch
+    total_steps  = config.epochs * steps_per_epoch
+    return optax.warmup_cosine_decay_schedule(
+        init_value=0.0,
+        peak_value=config.learning_rate,
+        warmup_steps=warmup_steps,
+        decay_steps=max(total_steps - warmup_steps, 1),
+        end_value=0.0,
+    )
+```
+
+**2. The optimizer is just a chain of pure transformations.** Optax expresses every optimizer as `(grads, state) -> (updates, new_state)`, and `optax.chain` composes any number of those transformations into a single one. Here gradient clipping happens *before* AdamW, which is what you almost always want on TPU because clipping after the parameter update is too late to help with the occasional bf16 spike:
+
+```python
+# src/breast_patch_cls/training/optimizer.py
+def create_optimizer(config: TrainConfig, learning_rate_schedule):
+    transforms = []
+    if config.grad_clip_norm is not None:
+        transforms.append(optax.clip_by_global_norm(config.grad_clip_norm))
+    if config.optimizer == "adamw":
+        transforms.append(
+            optax.adamw(
+                learning_rate=learning_rate_schedule,
+                weight_decay=config.weight_decay,
+            )
+        )
+    return optax.chain(*transforms)
+```
+
+**3. Focal loss in five lines.** This is the kind of code that tells you why the JAX style is fun. There is no `jit`, no `pmap`, no shape juggling, no device placement: just `jnp` ops on logits and a one-hot target. The compilation and parallelism happen later, when the training step closes over this function:
+
+```python
+# src/breast_patch_cls/training/losses.py
+def _softmax_focal_loss(logits, one_hot, gamma=2.0):
+    log_probs = jax.nn.log_softmax(logits)
+    probs     = jnp.exp(log_probs)
+    pt        = jnp.sum(probs * one_hot, axis=-1)
+    ce        = -jnp.sum(log_probs * one_hot, axis=-1)
+    return ((1.0 - pt) ** gamma) * ce
+```
+
+The full `classification_loss` wraps this with optional label smoothing (`optax.smooth_labels`) and per-class weights. Class weighting is a single broadcast: `losses = losses * class_weights[labels]`. No `nn.CrossEntropyLoss(weight=...)` ceremony.
+
+**4. The Flax model is a `linen.Module`.** Flax modules are dataclasses with a `__call__` defined under `@nn.compact`. The `train` flag flips BatchNorm and Dropout into eval mode at evaluation time. Conv / BN / ReLU is recognisable to anyone coming from PyTorch, but the *call site* is different: you don't see `.cuda()` or `.to(device)` anywhere because devices live outside the model:
+
+```python
+# src/breast_patch_cls/models/resnet.py
+class ResNetBlock(nn.Module):
+    features: int
+    stride: int = 1
+    drop_path_rate: float = 0.0
+    dtype: jnp.dtype = jnp.float32
+
+    @nn.compact
+    def __call__(self, x, *, train: bool):
+        residual = x
+        x = nn.Conv(self.features, (3, 3), self.stride,
+                    padding="SAME", use_bias=False, dtype=self.dtype)(x)
+        x = nn.BatchNorm(use_running_average=not train,
+                         momentum=0.9, epsilon=1e-5)(x)
+        x = nn.relu(x)
+        x = nn.Conv(self.features, (3, 3), 1,
+                    padding="SAME", use_bias=False, dtype=self.dtype)(x)
+        x = nn.BatchNorm(use_running_average=not train,
+                         momentum=0.9, epsilon=1e-5,
+                         scale_init=nn.initializers.zeros_init())(x)
+        if residual.shape != x.shape:
+            residual = nn.Conv(self.features, (1, 1), self.stride,
+                               use_bias=False, dtype=self.dtype)(residual)
+            residual = nn.BatchNorm(use_running_average=not train,
+                                    momentum=0.9, epsilon=1e-5)(residual)
+        x = DropPath(self.drop_path_rate)(x, deterministic=not train)
+        return nn.relu(x + residual)
+```
+
+The zero-init on the *second* BatchNorm `scale` is the classic "identity at init" trick: each block starts out as the identity function, which makes deep ResNets train more stably from random weights. That stability matters a lot when you're going from-scratch instead of fine-tuning.
+
+**5. The whole training state is one pytree.** This is the line where Flax and JAX's design earns the most credit. Optimizer state, EMA params, BatchNorm running stats, and the dropout RNG all sit in one `TrainState` object:
+
+```python
+# src/breast_patch_cls/training/train_state.py
+class TrainState(train_state.TrainState):
+    batch_stats: PyTree | None = None
+    ema_params:  PyTree | None = None
+    rng:         PyTree | None = struct.field(pytree_node=True, default=None)
+```
+
+`flax.jax_utils.replicate(state)` puts a copy on every device. `flax.jax_utils.unreplicate(state)` brings one back to the host. Save the pytree and you have saved the whole run; load it and you can resume. There is no separate "optimizer.pt + model.pt + scheduler.pt + scaler.pt" dance, and no question about which device each piece lives on.
+
+With those five pieces in hand, the training step is just gluing them together. Gradients, batch-stats, and EMA updates are all `pmean`'d across the `batch` axis:
 
 ```python
 def train_step(state, batch):
