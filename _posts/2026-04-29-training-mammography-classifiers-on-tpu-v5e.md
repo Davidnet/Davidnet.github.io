@@ -92,13 +92,76 @@ def train_step(state, batch):
 
 Once you're comfortable with the functional state pattern, this style of training loop is honestly delightful. Every transformation is a pure function, and the `pmap` boundary makes data parallelism explicit instead of magical.
 
+## Living with JAX/Flax on TPU
+
+It's worth digging into what the stack actually feels like in practice, because most "JAX vs PyTorch" takes online are abstract and not very useful when you're 30 minutes into a TPU lease and your loss is `nan`.
+
+### Functional state, on purpose
+
+In PyTorch, a model is a stateful object. You call `.to(device)`, `.train()`, `.zero_grad()`, and parameters mutate in place. In Flax (the older `linen` API I used here), a model is a *description*: `model.init(rng, x)` runs the forward once and returns a frozen pytree of parameters and buffers. From then on, every step is `params -> grads -> new_params`, all explicit, all immutable.
+
+That sounds bureaucratic until you realise what it buys you. The optimizer state, EMA weights, BatchNorm running stats, and dropout RNG are all just additional pytrees inside one `TrainState`. Replicating the whole thing across 8 chips is one call:
+
+```python
+replicated_state = flax.jax_utils.replicate(state)
+```
+
+Saving a checkpoint is "serialise this pytree." Restoring is "load this pytree." There is no gnarly question about which device the optimizer state lives on, or whether `.cuda()` was called in the right order. That mental simplicity is the single biggest reason I kept reaching for JAX even when the surrounding ecosystem hurt.
+
+### `pmap` is the whole game on a single host
+
+`jax.pmap` is conceptually `vmap`-with-side-effects: it adds a leading device axis and runs the function on each device in parallel. Anything you mark with `axis_name="batch"` gets a cross-device collective at that point. In our train step, three things cross the device boundary:
+
+- `jax.lax.pmean(grads, axis_name="batch")`: average gradients across all 8 chips so every replica steps to the same new params.
+- `jax.lax.pmean(loss, axis_name="batch")`: purely for logging; doesn't affect training.
+- `jax.lax.pmean(new_batch_stats, axis_name="batch")`: sync BatchNorm running mean/var so they don't drift per replica.
+
+EMA is updated *after* the `pmean`, so it stays in lockstep automatically. The `dropout_rng` is `fold_in`'d with `jax.lax.axis_index("batch")` so each replica gets a different dropout mask without us having to thread separate RNGs by hand.
+
+Once that pattern clicks, single-host data parallelism stops being a thing you think about. You write your step function as if the batch were just `(B/8, ...)` and let `pmap` deal with the rest.
+
+### bfloat16 is free, mostly
+
+TPU v5e's matrix unit (MXU) is built for bfloat16. We compute in bf16, accumulate in fp32, and keep the optimizer state in fp32. In Flax this is a model-side choice: pass `param_dtype=jnp.float32, dtype=jnp.bfloat16` to the conv/dense modules and Flax casts on the fly. Gradients come back in fp32 because the optimizer state is fp32, so AdamW updates stay numerically clean.
+
+What surprised me on this dataset: I never hit a single `nan`/`inf` from bf16 alone. The two times the loss exploded it was because of a bad LR (focal loss + 7e-4 + no warmup) or a bad augmentation magnitude, not from the precision. Gradient clipping at norm 1.0 is the cheap insurance policy.
+
+### XLA compilation is real wall-clock
+
+The first time you run a `pmap`'d step, JAX traces the function, compiles it through XLA, and ships the compiled HLO to the chips. On v5e for a ResNet34 forward+backward at batch 256, this took roughly 60–90 seconds before the first step actually executed. Subsequent steps are blazing.
+
+Two practical consequences:
+
+1. **Don't change shapes.** Every shape change retriggers compilation. The data pipeline has to produce a fixed `(local_devices, B/local_devices, H, W, C)` shape forever, which is why `drop_remainder=True` is set on every dataset and why the test set is effectively 9,728 samples instead of 9,770.
+2. **Smoke-test on CPU first.** I ran `configs/experiments/smoke_small_cnn.yaml` on a laptop before every TPU session. Catching a Flax module bug after a 90-second compile on a chip you're paying for by the minute is its own special kind of pain.
+
+### Data: TFDS over GCS, no `tf.distribute` involved
+
+The dataset lives in a public Google Cloud Storage bucket (`gs://cm3070-davidc-cbis-ddsm/tfds`) as a sharded TFDS build. The TPU VM reads it with the standard `tfds.load(..., data_dir="gs://...")`, then a small `tf.data` pipeline does decoding, normalisation, and augmentation on the host CPU. The output gets `as_numpy_iterator()`'d and handed to `shard_batch`, which is where the `(local_devices, ...)` reshape happens.
+
+There's no `tf.distribute.TPUStrategy` anywhere. The TPU runtime is JAX's; `tf.data` is purely a host-side data loader. This split (TF for I/O, JAX for compute) turns out to be much less painful than the all-TF setups I'd seen described in older blog posts.
+
+### Orbax checkpointing in two lines
+
+Saving the full TrainState to GCS is one call to `orbax.CheckpointManager`. Restoring is another. The painful step is making sure the pytree *structure* you're restoring into matches what was saved (Flax module changes can break this). I found that pinning the model class and config alongside the checkpoint paid for itself the first time I came back to a run a week later and couldn't remember whether the EMA weights were on or off.
+
+### Where the friction lives
+
+Everything I wrote above is the good part. The honest pain points were:
+
+- **Pretrained weights.** `timm` doesn't exist for JAX. There are [scenic](https://github.com/google-research/scenic) and [big_vision](https://github.com/google-research/big_vision), but the parameter-mapping work to import an ImageNet ResNet50's pretrained weights into a custom Flax `linen` ResNet is meaningful. I decided to skip it and go from-scratch, which is in retrospect part of why the TPU numbers trail the GPU numbers by 10 pp.
+- **ONNX export.** No first-class path. The pragmatic approach is `jax2tf` to a `tf.SavedModel`, then `tf2onnx`. Two-step, fragile, and I never bothered.
+- **Explainability.** `pytorch-grad-cam` has no JAX equivalent that's as turnkey. You can write GradCAM in JAX (gradients of class score w.r.t. activations is, after all, exactly what JAX is good at), but for the explainability section of the thesis it was clearly the right call to switch to PyTorch.
+- **Error messages.** XLA traceback errors on a compile failure are notoriously bad. "Invalid argument: Expected shape ..." with 80 lines of MLIR is not a fun debugging experience. The fix in 90% of cases is "trace through your shapes by hand on CPU first."
+
+The summary I'd give to anyone considering JAX on TPU for a research-scale project: if your problem is **a custom training loop, an architecture you control end-to-end, and lots of compute to burn**, JAX is wonderful. If your problem is **fine-tune-this-pretrained-model-and-explain-its-decisions**, pick PyTorch and be home for dinner.
+
 ## What I trained
 
 Five architectures, all from random initialisation:
 
 - **SmallCNN**: a 4-block convnet, used only as a smoke test for the pipeline.
-- **ResNet18 / ResNet34**: adapted for grayscale (5×5 stride-2 stem), GroupNorm/BatchNorm, stochastic depth.
-- **ResNet50**: same family. Note that the Flax implementation uses basic blocks for all depths, which makes ResNet50 architecturally identical to ResNet34 here. (Lesson learned: always paper-trace the implementation, not the name.)
+- **ResNet18 / ResNet34 / ResNet50**: adapted for grayscale (5×5 stride-2 stem), GroupNorm/BatchNorm, stochastic depth at 0.05 drop-path.
 - **ViT-Tiny / ViT-Small**: 16×16 patch embedding, learnable positional embeddings, [CLS] token.
 
 Across the five architectures plus a tuning campaign on ResNet34 plus a hyperparameter ablation, I shipped 15 TPU runs.
@@ -117,7 +180,7 @@ The schedule is the standard linear warmup → cosine decay; the figure above is
 |---|---:|---:|---:|---:|
 | ResNet18 | 11.2M | 0.410 | 0.231 | 0.662 |
 | **ResNet34** | 21.3M | **0.580** | **0.485** | **0.800** |
-| ResNet50* | 21.3M | 0.584 | 0.481 | 0.801 |
+| ResNet50 | 21.3M | 0.584 | 0.481 | 0.801 |
 | ViT-Tiny  | 5.4M  | 0.496 | 0.337 | 0.706 |
 | ViT-Small | 21.5M | 0.514 | 0.372 | 0.720 |
 
