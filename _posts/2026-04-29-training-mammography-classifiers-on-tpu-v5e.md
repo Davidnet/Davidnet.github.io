@@ -9,7 +9,7 @@ tags: [jax, flax, tpu, machine-learning, medical-imaging, thesis]
 
 # From scratch on TPU v5e: training mammography classifiers in JAX/Flax
 
-This is a write-up of the TPU portion of my undergraduate thesis (CM3070, *Computer Science Final Project*, University of London Goldsmiths). The thesis built two parallel pipelines for the same task: patch-level classification on the [Curated Breast Imaging Subset of DDSM](https://www.tensorflow.org/datasets/catalog/curated_breast_imaging_ddsm). Across both pipelines I trained 15 deep-learning experiments on a Google Cloud `v5litepod-8` TPU v5e accelerator using JAX/Flax. The whole project is on GitHub: [`CM3070-curated_breast_imaging_ddsm`](https://github.com/Davidnet/CM3070-curated_breast_imaging_ddsm).
+This is a write-up of the TPU portion of my undergraduate thesis (CM3070, *Computer Science Final Project*, University of London Goldsmiths). The thesis built two parallel pipelines for the same task: patch-level classification on the [Curated Breast Imaging Subset of DDSM](https://www.tensorflow.org/datasets/catalog/curated_breast_imaging_ddsm). Across both pipelines I trained 15 deep-learning experiments on a Google Cloud `v5litepod-8` TPU v5e accelerator using JAX/Flax. The TPU pipeline is on GitHub: [`CM3070-Models-Training-with-TPUs`](https://github.com/Davidnet/CM3070-Models-Training-with-TPUs).
 
 The post focuses on the JAX/Flax/TPU pipeline. A separate PyTorch pipeline handled pretrained models and explainability, and that one is a story for another day.
 
@@ -254,6 +254,6 @@ Pretraining wins. Even features learned on natural images transfer remarkably we
 5. **JAX/Flax on TPU is genuinely lovely once you internalise the functional pattern.** `pmap` makes data parallelism legible. The painful parts are everything *around* training: pretrained weight loading, ONNX export, GradCAM. None of those exist as drop-in tools the way they do in PyTorch. Pick the stack that matches the problem.
 6. **Architecture > tuning, on small datasets.** A multi-week ResNet34 tuning campaign moved the needle 0.6 pp. Switching to a pretrained Swin-Tiny moved it +10 pp. Choose your battles.
 
-The full thesis report (with confusion matrices, per-class breakdowns, GradCAM analyses, and the GPU pipeline) is in the [project repo](https://github.com/Davidnet/CM3070-curated_breast_imaging_ddsm). The TPU pipeline lives under [`CM3070-Models-Implementation-Evaluation/models-training-with-tpus/`](https://github.com/Davidnet/CM3070-curated_breast_imaging_ddsm/tree/main/CM3070-Models-Implementation-Evaluation/models-training-with-tpus). Configs, training scripts, and the evaluation harness are all there.
+The TPU pipeline lives at [`Davidnet/CM3070-Models-Training-with-TPUs`](https://github.com/Davidnet/CM3070-Models-Training-with-TPUs). Configs, training scripts, and the evaluation harness are all there.
 
 If you have questions or spot something I got wrong, my [contact details](/contact) are on the front page.
