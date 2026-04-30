@@ -121,6 +121,14 @@ img {
 	width: 200px;
 }
 
+main img[src*="/assets/img/blog/"] {
+	width: 100%;
+	max-width: 100%;
+	height: auto;
+	display: block;
+	margin: 1.25em auto;
+}
+
 .image-right {
   display: block;
   margin-left: auto;
