@@ -29,7 +29,7 @@ So the TPU pipeline runs from random initialisation. No pretrained weights. The 
 
 ## The pipeline
 
-The training loop is built around `jax.pmap` with a single host driving 8 v5e cores (128 GB total HBM). Mixed precision is bfloat16 throughout, AdamW + warmup-cosine, gradient norm clipped at 1.0, Orbax for checkpointing. A typical run config looks like this (the `final_best` ResNet34 recipe):
+The training loop is built around `jax.pmap` on a `v5litepod-8` slice: 8 TPU v5e chips, one TensorCore per chip, 16 GB HBM per chip for 128 GB total. JAX sees 8 devices, and `pmap` shards the global batch across all of them. Mixed precision is bfloat16 throughout, AdamW + warmup-cosine, gradient norm clipped at 1.0, Orbax for checkpointing. A typical run config looks like this (the `final_best` ResNet34 recipe):
 
 ```yaml
 # resnet34_gray model
