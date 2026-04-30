@@ -235,9 +235,96 @@ Two practical consequences:
 
 ### Data: TFDS over GCS, no `tf.distribute` involved
 
-The dataset lives in a public Google Cloud Storage bucket (`gs://cm3070-davidc-cbis-ddsm/tfds`) as a sharded TFDS build. The TPU VM reads it with the standard `tfds.load(..., data_dir="gs://...")`, then a small `tf.data` pipeline does decoding, normalisation, and augmentation on the host CPU. The output gets `as_numpy_iterator()`'d and handed to `shard_batch`, which is where the `(local_devices, ...)` reshape happens.
+The dataset lives in a public Google Cloud Storage bucket (`gs://cm3070-davidc-cbis-ddsm/tfds`) as a sharded TFDS build of `curated_breast_imaging_ddsm/patches:3.0.0`. From the TPU VM's point of view, "where is the data" is just a config field:
 
-There's no `tf.distribute.TPUStrategy` anywhere. The TPU runtime is JAX's; `tf.data` is purely a host-side data loader. This split (TF for I/O, JAX for compute) turns out to be much less painful than the all-TF setups I'd seen described in older blog posts.
+```yaml
+# configs/data/conservative_aug.yaml
+dataset_name: curated_breast_imaging_ddsm/patches:3.0.0
+data_dir: gs://cm3070-davidc-cbis-ddsm/tfds
+train_split: train
+validation_split: validation
+test_split: test
+image_size: [224, 224, 1]
+shuffle_buffer_size: 8192
+prefetch_batches: 4
+drop_remainder: true
+```
+
+TFDS gives you two entry points and we use both. `tfds.builder(...)` is the metadata side (number of examples per split, feature schemas), useful for sizing `steps_per_epoch` without scanning the dataset:
+
+```python
+# src/breast_patch_cls/data/tfds_builder.py
+def load_builder(config: DataConfig) -> tfds.core.DatasetBuilder:
+    return tfds.builder(config.dataset_name, data_dir=config.data_dir)
+
+# elsewhere:
+builder = load_builder(config.data)
+train_examples = builder.info.splits[config.data.train_split].num_examples
+steps_per_epoch = train_examples // config.train.batch_size
+```
+
+`tfds.load(...)` is the data side. It returns a `tf.data.Dataset` of decoded examples, which we then plug into a small `tf.data` pipeline doing shuffle / preprocess / augment / batch / prefetch:
+
+```python
+# src/breast_patch_cls/data/input_pipeline.py
+def make_dataset(config, *, split, batch_size, training, limit_steps=None):
+    ds = tfds.load(config.dataset_name, split=split, data_dir=config.data_dir)
+    options = tf.data.Options()
+    options.experimental_deterministic = not training
+    ds = ds.with_options(options)
+
+    if config.cache:
+        ds = ds.cache()
+    if training:
+        ds = ds.shuffle(config.shuffle_buffer_size, reshuffle_each_iteration=True)
+
+    ds = ds.map(lambda ex: preprocess_example(ex, config),
+                num_parallel_calls=tf.data.AUTOTUNE)
+    if training:
+        ds = ds.map(
+            lambda ex: {"image": augment_image(ex["image"], config.augmentation),
+                        "label": ex["label"], "id": ex["id"]},
+            num_parallel_calls=tf.data.AUTOTUNE,
+        )
+        ds = ds.repeat()
+
+    ds = ds.batch(batch_size, drop_remainder=True)
+    return ds.prefetch(config.prefetch_batches)
+```
+
+A few things worth highlighting for anyone setting up a TPU pipeline for the first time:
+
+- **`drop_remainder=True` is non-negotiable.** TPU/XLA needs static shapes. A trailing partial batch would either retrigger compilation or crash. The cost is that the test set is effectively 9,728 samples instead of 9,770 (the 42-sample residual gets dropped), small enough that test metrics shift by < 0.1 pp.
+- **`AUTOTUNE` on host CPU is enough.** Augmentation runs in `tf.data` on the host, *not* on the TPU. The chips never see uint8 inputs; by the time a batch reaches them it's already float, normalised, augmented, and pre-sharded.
+- **`reshuffle_each_iteration=True`** is the difference between "every epoch sees the same shuffle" and a different one. Easy to miss; matters more than you'd think for small datasets.
+
+Preprocessing and augmentation are plain TensorFlow ops. Normalisation is parameterised by config (`mean_std` or `minus_one_to_one`):
+
+```python
+# src/breast_patch_cls/data/preprocessing.py
+def normalize_image(image, config):
+    image = tf.cast(image, tf.float32) / 255.0
+    if config.normalization.mode == "mean_std":
+        return (image - config.normalization.mean) / config.normalization.std
+    if config.normalization.mode == "minus_one_to_one":
+        return image * 2.0 - 1.0
+    raise ValueError(f"Unsupported normalization mode: {config.normalization.mode}")
+```
+
+The augmentation lives in `data/augmentations.py`. Translation is a `tf.roll` with a uniform random shift; rotation is a small affine transform via `tf.raw_ops.ImageProjectiveTransformV3`; brightness and contrast are stock `tf.image` ops. Horizontal flip is *gated by config* (default off) because mammographic patches carry left/right diagnostic information, and the conservative recipe deliberately keeps the magnitudes tiny (6-pixel translation, 10° rotation, brightness δ = 0.05). The augmentation ablation later in this post shows why being conservative was the right call.
+
+The bridge from `tf.data` to JAX is one helper that calls `tfds.as_numpy` and yields plain NumPy dicts:
+
+```python
+# src/breast_patch_cls/data/input_pipeline.py
+def dataset_iterator(dataset: tf.data.Dataset):
+    for batch in tfds.as_numpy(dataset):
+        yield {"image": batch["image"], "label": batch["label"], "id": batch["id"]}
+```
+
+That iterator is then wrapped by `prepare_per_device_iterator`, which adds the `(local_devices, B/local_devices, …)` reshape and prefetches host batches onto the TPU using `flax.jax_utils.prefetch_to_device`. The TFDS / `tf.data` half stays on the host CPU; everything past the reshape is JAX's.
+
+There's no `tf.distribute.TPUStrategy` anywhere. The TPU runtime is JAX's; TFDS and `tf.data` are purely host-side. This split (TF for I/O, JAX for compute) turns out to be much less painful than the all-TF setups I'd seen described in older blog posts, and it means the same data pipeline works unchanged when I run a smoke test on a laptop with `jax.local_device_count() == 1`.
 
 ### Orbax checkpointing in two lines
 
